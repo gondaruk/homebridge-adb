@@ -379,12 +379,15 @@ class ADBPlugin {
 							if(this.currentInputIndex != 0 && this.inputs[this.currentInputIndex].id != OTHER_APP_ID) {
 								let type = this.inputs[this.currentInputIndex].id.trim();
 
-								if(!type.includes(" ") && type.includes("."))
-									adb = `adb -s ${this.ip} shell "monkey -p ${this.inputs[this.currentInputIndex].id} 1"`;
-								else if (this.inputs[this.currentInputIndex].adb)
+								if (this.inputs[this.currentInputIndex].adb) {
 									adb = `adb -s ${this.ip} shell "${this.inputs[this.currentInputIndex].adb}"`;
-								else
+								}
+								else if(!type.includes(" ") && type.includes(".")) {
+									adb = `adb -s ${this.ip} shell "monkey -p ${this.inputs[this.currentInputIndex].id} 1"`;
+								}
+								else {
 									adb = `adb -s ${this.ip} shell "${this.inputs[this.currentInputIndex].id}"`;
+								}
 							}
 
 							exec(adb, (err, stdout, stderr) => {
@@ -752,13 +755,40 @@ class ADBPlugin {
 
 						if(this.inputs.length > 0) {
 							if(this.inputs[this.currentInputIndex].id != stdout && (stdout === HOME_APP_ID || this.inputs[this.currentInputIndex].type !== 'command')) {
-								this.inputs.forEach((input, i) => {
-									// Home or registered app
-									if(stdout == input.id) {
-										this.currentInputIndex = i;
-										otherApp = false;
-									}
-								});
+								let currentInputs = this.inputs
+									.map((input, i) => {return Object.assign({}, input, {'_idx': i})})
+									.filter((input) => { input.id == stdout });
+								if (currentInputs.length > 1) {
+									// means we have multiple inputs for the same app
+									// likely with different adb cmds, let's try to match by intent
+
+
+									exec(`adb -s ${this.ip} shell "dumpsys activity | grep mIntent"`, (intentErr, intentStdout, intentStderr) => {
+										if(intentErr) {
+											this.displayDebug(`checkInput (intent) - error`)
+										} else {
+											if (!intentStdout) intentStdout = "";
+											intentStdout = intentStdout.trim();
+
+											currentInputs.forEach((input) => {
+												// Home or registered app
+												if(input.hasOwnProperty('intentMatch') && input.intentMatch.length > 0 && intentStdout.contains(input.intentMatch)) {
+													this.currentInputIndex = input._idx;
+													otherApp = false;
+												}
+											});
+
+										}
+									})
+								} else {
+									this.inputs.forEach((input, i) => {
+										// Home or registered app
+										if(stdout == input.id) {
+											this.currentInputIndex = i;
+											otherApp = false;
+										}
+									});
+								}
 
 								// Other app
 								if(otherApp && !this.hideother) {
