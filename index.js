@@ -52,6 +52,8 @@ class ADBPlugin {
 		this.playbacksensor = this.config.playbacksensor;
 		this.playbacksensorexclude =  this.config.playbacksensorexclude;
 		if(!this.playbacksensorexclude) this.playbacksensorexclude = "";
+		// Brightness
+		this.enablebrightness = this.config.enablebrightness;
 		// Power ON/OFF
 		this.poweron = this.config.poweron;
 		this.poweroff = this.config.poweroff;
@@ -70,6 +72,7 @@ class ADBPlugin {
 		// Variable
 		this.awake = false;
 		this.playing = false;
+		this.brightness = 100;
 		this.currentInputIndex = 0;
 		this.currentApp = false;
 		this.currentAppOnProgress = false;
@@ -143,6 +146,11 @@ class ADBPlugin {
 			// Create additional services
 			if(!this.skipSpeaker) {
 				this.createTelevisionSpeakers();
+			}
+
+			// Create brightness control
+			if (this.enablebrightness) {
+				this.createLightService();
 			}
 		}
 
@@ -317,6 +325,48 @@ class ADBPlugin {
 			});
 
 		this.deviceService.addLinkedService(this.deviceTelevisionSpeakerService);
+	}
+
+	createLightService() {
+		/**
+		 * Create a lightbulb service to allow brightness control
+		 */
+
+		this.deviceLightbulbService = this.device.addService(Service.Lightbulb);
+
+		this.deviceLightbulbService
+			.setCharacteristic(Characteristic.On, true)
+
+		this.deviceLightbulbService.getCharacteristic(Characteristic.Brightness)
+		.on('set', (state, callback) => {
+
+			this.displayDebug("handleBrightness - settings new=" + state + ", current=" + this.brightness + ", equals=" + state == this.brightness);
+			if (state != this.brightness) {
+
+				state = Math.max(1, parseInt(state));
+
+				exec(`adb -s ${this.ip} shell "settings put global picture_backlight ${state}"`, (err, stdout, stderr) => {
+					if(err) {
+						this.log.info(this.name, "- Can't set brightness");
+						this.displayDebug("handleBrightness - Error - " + stderr.trim());
+						this.brightness = 100;
+					} else {
+						this.brightness = parseInt(state);
+						this.displayDebug(`Brightness - ${this.brightness}`)
+					}
+
+					this.deviceLightbulbService.updateCharacteristic(Characteristic.Brightness, this.brightness);
+				});
+			}
+			callback(null);
+		}).on('get', (callback) => {
+			this.checkBrightness(() => {
+				this.deviceLightbulbService.updateCharacteristic(Characteristic.Brightness, this.brightness);
+			});
+			callback(null, this.brightness);
+		});
+
+		this.deviceService.addLinkedService(this.deviceLightbulbService);
 	}
 
 	handleOnOff() {
@@ -833,6 +883,35 @@ class ADBPlugin {
 		}
 	}
 
+	checkBrightness(callback) {
+		if(this.awake) {
+
+			exec(`adb -s ${this.ip} shell "settings get global picture_backlight"`,
+					(err, stdout, stderr) => {
+						if (err) {
+							this.displayDebug(`checkBrightness - Error - ${stderr}`);
+							if (callback) callback(0);
+						} else {
+							var output = parseInt(stdout.trim());
+							if (output < 0) {
+								output = 0;
+							} else if (output > 100) {
+								output = 100;
+							}
+							this.brightness = output;
+
+							this.deviceLightbulbService.getCharacteristic(
+									Characteristic.Brightness).updateValue(this.brightness);
+						}
+
+						if (callback) callback(this.brightness);
+					})
+		} else {
+			this.deviceLightbulbService.getCharacteristic(
+					Characteristic.Brightness).updateValue(this.brightness);
+		}
+	}
+
 	connect(callback, done) {
 		var that = this;
 		var error = function() {
@@ -872,6 +951,9 @@ class ADBPlugin {
 
 					// Check playback status
 					if(that.playbacksensor) that.checkPlayback();
+
+					// Check brightness
+					if(that.enablebrightness) that.checkBrightness();
 				}
 			});
 		}, this.interval);

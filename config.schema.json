@@ -78,6 +78,17 @@
 					        "type": "string",
 							"default": ""
 						},
+						"enablebrightness": {
+							"type": "string",
+							"title": "Allow controlling brightness",
+							"placeholder": "Allow controlling brightness",
+							"type": "boolean",
+							"default": "true",
+							"oneOf": [
+								{ "title": "Yes", "enum": ["true"] },
+								{ "title": "No", "enum": ["false"] }
+							]
+						},
 						"debug": {
 							"type": "string",
 							"title": "Display more debug message",
